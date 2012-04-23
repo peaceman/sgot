@@ -1,0 +1,6 @@
+[submodule "Requests"]
+	path = Requests
+	url = git://github.com/rmccue/Requests.git
+[submodule "libphutil"]
+	path = libphutil
+	url = git://github.com/facebook/libphutil.git
