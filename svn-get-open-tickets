@@ -21,7 +21,6 @@ $argumentSpecifications = array(
 		'name' => 'apiurl',
 		'help' => 'URL zur JSON-Api des Trac-Systems',
 		'param' => 'apiurl',
-		'default' => 'https://okd.demobereich.de/trac/login/jsonrpc',
 	)),
 	PhutilArgumentSpecification::newQuickSpec(array(
 		'name' => 'svn-user',
