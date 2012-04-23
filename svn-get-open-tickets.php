@@ -1,0 +1,120 @@
+#!/usr/local/bin/php
+<?php
+require_once 'libphutil/scripts/__init_script__.php';
+require_once 'Requests/library/Requests.php';
+require_once 'functions.php';
+Requests::register_autoloader();
+phutil_require_module('phutil', 'console');
+
+$argumentSpecifications = array(
+	PhutilArgumentSpecification::newQuickSpec(array(
+		'name' => 'repo',
+		'help' => 'URL des zu ueberpruefenden SVN-Repositories',
+		'param' => 'repo',
+	)),
+	PhutilArgumentSpecification::newQuickSpec(array(
+		'name' => 'rev',
+		'help' => 'Start-Revision fuer die Ueberpruefung',
+		'param' => 'rev',
+	)),
+	PhutilArgumentSpecification::newQuickSpec(array(
+		'name' => 'apiurl',
+		'help' => 'URL zur JSON-Api des Trac-Systems',
+		'param' => 'apiurl',
+		'default' => 'https://okd.demobereich.de/trac/login/jsonrpc',
+	)),
+	PhutilArgumentSpecification::newQuickSpec(array(
+		'name' => 'svn-user',
+		'help' => 'Nutzername fuer SVN',
+		'param' => 'username',
+	)),
+	PhutilArgumentSpecification::newQuickSpec(array(
+		'name' => 'svn-pass',
+		'help' => 'Passwort fuer SVN',
+		'param' => 'password',
+	)),
+	PhutilArgumentSpecification::newQuickSpec(array(
+		'name' => 'trac-user',
+		'help' => 'Nutzername fuer Trac',
+		'param' => 'username',
+	)),
+	PhutilArgumentSpecification::newQuickSpec(array(
+		'name' => 'trac-pass',
+		'help' => 'Passwort fuer Trac',
+		'param' => 'password',
+	)),
+
+);
+$argumentParser = new PhutilArgumentParser($argv);
+$argumentParser->parse($argumentSpecifications);
+
+$args = array(
+	'repo' => $argumentParser->getArg('repo'),
+	'rev' => $argumentParser->getArg('rev'),
+	'apiurl' => $argumentParser->getArg('apiurl'),
+	'svn-user' => $argumentParser->getArg('svn-user'),
+	'svn-pass' => $argumentParser->getArg('svn-pass'),
+	'trac-user' => $argumentParser->getArg('trac-user'),
+	'trac-pass' => $argumentParser->getArg('trac-pass'),
+);
+
+$promptableArgs = array(
+	'svn-user',
+	'svn-pass',
+	'trac-user',
+	'trac-pass',
+);
+
+foreach ($args as $argName => &$arg) {
+	if ($arg === null) {
+		if (in_array($argName, $promptableArgs)) {
+			$arg = strpos($argName, 'pass') !== false ? prompt_silent($argName . ': ') : phutil_console_prompt($argName . ': ');	
+		} else {
+			$argumentParser->printHelpAndExit();
+		}
+	}
+}
+
+svn_auth_set_parameter(SVN_AUTH_PARAM_DEFAULT_USERNAME, $args['svn-user']);
+svn_auth_set_parameter(SVN_AUTH_PARAM_DEFAULT_PASSWORD, $args['svn-pass']);
+$logs = svn_log($args['repo'], $args['rev'], SVN_REVISION_HEAD);
+
+$comments = array_map(function($value) {
+	return $value['msg'];
+}, $logs);
+
+$ticketIds = array_unique(array_filter(array_map(function($value) {
+	$matches = array();
+	$matchCount = preg_match('~refs #([0-9]+)~', $value, $matches);
+	if ($matchCount !== 1)
+		return null;
+
+	return (int)$matches[1];
+}, $comments)));
+
+$openTickets = array_filter($ticketIds, function($ticketId) use ($args) {
+	$request = array(
+		'method' => 'ticket.get',
+		'params' => array(
+			$ticketId,
+		)
+	);
+
+	$response = Requests::post($args['apiurl'], array('Content-Type' => 'application/json'), json_encode($request), array('auth' => array($args['trac-user'], $args['trac-pass'])));
+	if (!$response->success) {
+		echo "Trac HTTP Response Code {$response->status_code}" . PHP_EOL;
+		exit(1);
+	}
+
+	$response = json_decode($response->body);
+	return $response->result[3]->status !== 'closed';
+});
+
+if (!empty($openTickets)) {
+	foreach ($openTickets as $openTicketId) {
+		echo "Offenes Ticket {$openTicketId}" . PHP_EOL;
+	}
+} else {
+	echo 'Alle Tickets sind geschlossen' . PHP_EOL;
+}
+
